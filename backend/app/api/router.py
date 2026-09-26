@@ -17,8 +17,10 @@ from app.services.oven_engine import (
     Occupancy,
     RecipeDurations,
     build_occupancies,
+    build_stored_occupancies,
     find_conflicts,
     next_free_window,
+    recipe_ends,
 )
 
 api_router = APIRouter()
@@ -28,22 +30,28 @@ def _recipe(p: Product) -> RecipeDurations:
     return RecipeDurations(p.ferment_min, p.bake_min)
 
 
+def _ends_mismatch(b: Batch, p: Product | None) -> bool:
+    """落库止点与按当前产品时长现算不一致时为 True（只标记，不改库）。"""
+    if not p:
+        return False
+    ferment_end, bake_end = recipe_ends(b.start_min, _recipe(p))
+    return b.ferment_end_min != ferment_end or b.bake_end_min != bake_end
+
+
 def _all_occupancies(db: Session) -> list[Occupancy]:
+    """已存在批次的占炉区间一律取落库的两列止点。"""
     batches = db.scalars(select(Batch)).all()
     out: list[Occupancy] = []
     for b in batches:
-        p = db.get(Product, b.product_id)
-        if not p:
-            continue
-        out.extend(build_occupancies(b.oven_id, b.id, b.start_min, _recipe(p)))
+        out.extend(
+            build_stored_occupancies(b.oven_id, b.id, b.start_min, b.ferment_end_min, b.bake_end_min)
+        )
     return out
 
 
 def _batch_out(db: Session, b: Batch) -> BatchOut:
     p = db.get(Product, b.product_id)
     o = db.get(Oven, b.oven_id)
-    ferment_end = b.start_min + (p.ferment_min if p else 0)
-    bake_end = ferment_end + (p.bake_min if p else 0)
     return BatchOut(
         id=b.id,
         product_id=b.product_id,
@@ -53,8 +61,9 @@ def _batch_out(db: Session, b: Batch) -> BatchOut:
         status=b.status,
         product_name=p.name if p else None,
         oven_label=o.label if o else None,
-        ferment_end=ferment_end,
-        bake_end=bake_end,
+        ferment_end=b.ferment_end_min,
+        bake_end=b.bake_end_min,
+        ends_mismatch=_ends_mismatch(b, p),
     )
 
 
@@ -99,11 +108,14 @@ def create_batch(body: BatchCreate, db: Session = Depends(get_db)):
         db.add(ConflictLog(batch_code=code, oven_id=oven.id, detail=detail))
         db.commit()
         raise HTTPException(409, detail)
+    ferment_end, bake_end = recipe_ends(body.start_min, recipe)
     batch = Batch(
         product_id=product.id,
         oven_id=oven.id,
         code=code,
         start_min=body.start_min,
+        ferment_end_min=ferment_end,
+        bake_end_min=bake_end,
     )
     db.add(batch)
     db.commit()
@@ -117,9 +129,10 @@ def gantt(db: Session = Depends(get_db)):
     for b in db.scalars(select(Batch).order_by(Batch.start_min)).all():
         p = db.get(Product, b.product_id)
         o = db.get(Oven, b.oven_id)
-        if not p or not o:
+        if not o:
             continue
-        for occ in build_occupancies(b.oven_id, b.id, b.start_min, _recipe(p)):
+        mismatch = _ends_mismatch(b, p)
+        for occ in build_stored_occupancies(b.oven_id, b.id, b.start_min, b.ferment_end_min, b.bake_end_min):
             blocks.append(
                 GanttBlock(
                     batch_id=b.id,
@@ -129,6 +142,7 @@ def gantt(db: Session = Depends(get_db)):
                     phase=occ.phase,
                     start_min=occ.interval.start,
                     end_min=occ.interval.end,
+                    ends_mismatch=mismatch,
                 )
             )
     return blocks

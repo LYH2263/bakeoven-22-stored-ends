@@ -32,17 +32,33 @@ class Occupancy:
     batch_id: int
 
 
+def recipe_ends(start_min: int, recipe: RecipeDurations) -> tuple[int, int]:
+    """按产品时长算出的 (发酵止, 烘烤止)，仅用于创建时写入和一致性核对。"""
+    ferment_end = start_min + recipe.ferment_min
+    return ferment_end, ferment_end + recipe.bake_min
+
+
 def build_occupancies(
     oven_id: int,
     batch_id: int,
     start_min: int,
     recipe: RecipeDurations,
 ) -> list[Occupancy]:
-    ferment = Interval(start_min, start_min + recipe.ferment_min)
-    bake = Interval(ferment.end, ferment.end + recipe.bake_min)
+    ferment_end, bake_end = recipe_ends(start_min, recipe)
+    return build_stored_occupancies(oven_id, batch_id, start_min, ferment_end, bake_end)
+
+
+def build_stored_occupancies(
+    oven_id: int,
+    batch_id: int,
+    start_min: int,
+    ferment_end_min: int,
+    bake_end_min: int,
+) -> list[Occupancy]:
+    """按批次落库的止点构建占炉区间——已存在批次的唯一读取入口。"""
     return [
-        Occupancy(oven_id, ferment, "ferment", batch_id),
-        Occupancy(oven_id, bake, "bake", batch_id),
+        Occupancy(oven_id, Interval(start_min, ferment_end_min), "ferment", batch_id),
+        Occupancy(oven_id, Interval(ferment_end_min, bake_end_min), "bake", batch_id),
     ]
 
 

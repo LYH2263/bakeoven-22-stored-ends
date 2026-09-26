@@ -247,6 +247,15 @@ select, input, .gantt-deck button, .toolbar button {
 }
 .mono { font-family: "IBM Plex Mono", monospace; }
 .err { color: #ff9b7a; } .ok { color: #e8c48a; }
+.flag-warn {
+  margin-left: .5rem;
+  padding: .08rem .4rem;
+  border: 1px dashed #ff9b7a;
+  border-radius: 3px;
+  color: #ff9b7a;
+  font-size: .72rem;
+  white-space: nowrap;
+}
 
 .gantt { display: flex; flex-direction: column; gap: .65rem; }
 .gantt-row {
@@ -285,6 +294,10 @@ select, input, .gantt-deck button, .toolbar button {
   background: var(--bake);
   border: 1px solid #f0a060;
   box-shadow: 0 0 8px rgba(217, 121, 65, .35);
+}
+.gantt-block.mismatch {
+  outline: 2px dashed #ffd0c0;
+  outline-offset: -2px;
 }
 .axis {
   display: grid;
