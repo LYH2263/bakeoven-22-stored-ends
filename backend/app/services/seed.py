@@ -4,6 +4,20 @@ from sqlalchemy.orm import Session
 from app.models.models import Batch, ConflictLog, Oven, Product
 
 
+def _batch(product: Product, oven: Oven, code: str, start_min: int) -> Batch:
+    # 与创建接口同一口径：按创建时的产品时长写入发酵止/烘烤止
+    ferment_end = start_min + product.ferment_min
+    return Batch(
+        product_id=product.id,
+        oven_id=oven.id,
+        code=code,
+        start_min=start_min,
+        ferment_end_min=ferment_end,
+        bake_end_min=ferment_end + product.bake_min,
+        status="scheduled",
+    )
+
+
 def seed_if_empty(db: Session) -> None:
     if db.scalar(select(Product.id).limit(1)):
         return
@@ -21,9 +35,9 @@ def seed_if_empty(db: Session) -> None:
     db.flush()
     db.add_all(
         [
-            Batch(product_id=products[0].id, oven_id=ovens[0].id, code="BO-0900", start_min=9 * 60, status="scheduled"),
-            Batch(product_id=products[1].id, oven_id=ovens[0].id, code="BO-1030", start_min=10 * 60 + 30, status="scheduled"),
-            Batch(product_id=products[2].id, oven_id=ovens[1].id, code="BO-1000", start_min=10 * 60, status="scheduled"),
+            _batch(products[0], ovens[0], "BO-0900", 9 * 60),
+            _batch(products[1], ovens[0], "BO-1030", 10 * 60 + 30),
+            _batch(products[2], ovens[1], "BO-1000", 10 * 60),
         ]
     )
     db.add(

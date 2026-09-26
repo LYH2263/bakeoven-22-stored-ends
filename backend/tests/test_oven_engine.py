@@ -3,9 +3,22 @@ from app.services.oven_engine import (
     Occupancy,
     RecipeDurations,
     build_occupancies,
+    build_occupancies_from_ends,
     find_conflicts,
     next_free_window,
 )
+
+
+def test_build_occupancies_from_ends():
+    occs = build_occupancies_from_ends(1, 9, 540, 580, 614)
+    assert [o.phase for o in occs] == ["ferment", "bake"]
+    assert occs[0].interval == Interval(540, 580)
+    assert occs[1].interval == Interval(580, 614)
+
+
+def test_build_occupancies_matches_recipe_ends():
+    recipe = RecipeDurations(40, 35)
+    assert build_occupancies(1, 9, 540, recipe) == build_occupancies_from_ends(1, 9, 540, 580, 615)
 
 
 def test_half_open_no_touch_conflict():

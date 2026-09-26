@@ -28,6 +28,7 @@ class BatchOut(BaseModel):
     oven_label: str | None = None
     ferment_end: int | None = None
     bake_end: int | None = None
+    ends_mismatch: bool = False  # 库里的止点与按当前产品时长现算不一致
     model_config = {"from_attributes": True}
 
 
@@ -46,6 +47,7 @@ class GanttBlock(BaseModel):
     phase: str
     start_min: int
     end_min: int
+    ends_mismatch: bool = False  # 库里的止点与按当前产品时长现算不一致
 
 
 class ConflictOut(BaseModel):

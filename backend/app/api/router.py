@@ -16,7 +16,7 @@ from app.schemas.schemas import (
 from app.services.oven_engine import (
     Occupancy,
     RecipeDurations,
-    build_occupancies,
+    build_occupancies_from_ends,
     find_conflicts,
     next_free_window,
 )
@@ -28,6 +28,26 @@ def _recipe(p: Product) -> RecipeDurations:
     return RecipeDurations(p.ferment_min, p.bake_min)
 
 
+def _expected_ends(b: Batch, p: Product) -> tuple[int, int]:
+    """按当前产品时长现算的止点，仅用于比对，不写库。"""
+    ferment_end = b.start_min + p.ferment_min
+    return ferment_end, ferment_end + p.bake_min
+
+
+def _stored_ends(b: Batch, p: Product) -> tuple[int, int]:
+    """端点以库里的两列为准；仅当旧行尚未回填（NULL）时退化为现算。"""
+    expected = _expected_ends(b, p)
+    ferment_end = b.ferment_end_min if b.ferment_end_min is not None else expected[0]
+    bake_end = b.bake_end_min if b.bake_end_min is not None else expected[1]
+    return ferment_end, bake_end
+
+
+def _ends_mismatch(b: Batch, p: Product) -> bool:
+    if b.ferment_end_min is None or b.bake_end_min is None:
+        return False
+    return (b.ferment_end_min, b.bake_end_min) != _expected_ends(b, p)
+
+
 def _all_occupancies(db: Session) -> list[Occupancy]:
     batches = db.scalars(select(Batch)).all()
     out: list[Occupancy] = []
@@ -35,15 +55,20 @@ def _all_occupancies(db: Session) -> list[Occupancy]:
         p = db.get(Product, b.product_id)
         if not p:
             continue
-        out.extend(build_occupancies(b.oven_id, b.id, b.start_min, _recipe(p)))
+        ferment_end, bake_end = _stored_ends(b, p)
+        out.extend(build_occupancies_from_ends(b.oven_id, b.id, b.start_min, ferment_end, bake_end))
     return out
 
 
 def _batch_out(db: Session, b: Batch) -> BatchOut:
     p = db.get(Product, b.product_id)
     o = db.get(Oven, b.oven_id)
-    ferment_end = b.start_min + (p.ferment_min if p else 0)
-    bake_end = ferment_end + (p.bake_min if p else 0)
+    if p:
+        ferment_end, bake_end = _stored_ends(b, p)
+        mismatch = _ends_mismatch(b, p)
+    else:
+        ferment_end = bake_end = b.start_min
+        mismatch = False
     return BatchOut(
         id=b.id,
         product_id=b.product_id,
@@ -55,6 +80,7 @@ def _batch_out(db: Session, b: Batch) -> BatchOut:
         oven_label=o.label if o else None,
         ferment_end=ferment_end,
         bake_end=bake_end,
+        ends_mismatch=mismatch,
     )
 
 
@@ -86,7 +112,9 @@ def create_batch(body: BatchCreate, db: Session = Depends(get_db)):
     if not product or not oven:
         raise HTTPException(404, "产品或炉位不存在")
     recipe = _recipe(product)
-    candidates = build_occupancies(oven.id, -1, body.start_min, recipe)
+    ferment_end = body.start_min + recipe.ferment_min
+    bake_end = ferment_end + recipe.bake_min
+    candidates = build_occupancies_from_ends(oven.id, -1, body.start_min, ferment_end, bake_end)
     existing = _all_occupancies(db)
     hits = find_conflicts(existing, candidates)
     code = body.code or f"BO-{body.start_min}"
@@ -104,6 +132,8 @@ def create_batch(body: BatchCreate, db: Session = Depends(get_db)):
         oven_id=oven.id,
         code=code,
         start_min=body.start_min,
+        ferment_end_min=ferment_end,
+        bake_end_min=bake_end,
     )
     db.add(batch)
     db.commit()
@@ -119,7 +149,9 @@ def gantt(db: Session = Depends(get_db)):
         o = db.get(Oven, b.oven_id)
         if not p or not o:
             continue
-        for occ in build_occupancies(b.oven_id, b.id, b.start_min, _recipe(p)):
+        ferment_end, bake_end = _stored_ends(b, p)
+        mismatch = _ends_mismatch(b, p)
+        for occ in build_occupancies_from_ends(b.oven_id, b.id, b.start_min, ferment_end, bake_end):
             blocks.append(
                 GanttBlock(
                     batch_id=b.id,
@@ -129,6 +161,7 @@ def gantt(db: Session = Depends(get_db)):
                     phase=occ.phase,
                     start_min=occ.interval.start,
                     end_min=occ.interval.end,
+                    ends_mismatch=mismatch,
                 )
             )
     return blocks

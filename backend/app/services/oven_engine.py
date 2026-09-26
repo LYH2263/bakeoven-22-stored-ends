@@ -32,18 +32,35 @@ class Occupancy:
     batch_id: int
 
 
+def build_occupancies_from_ends(
+    oven_id: int,
+    batch_id: int,
+    start_min: int,
+    ferment_end_min: int,
+    bake_end_min: int,
+) -> list[Occupancy]:
+    """按给定止点占炉：发酵 [start, ferment_end)，烘烤 [ferment_end, bake_end)。"""
+    ferment = Interval(start_min, ferment_end_min)
+    bake = Interval(ferment_end_min, bake_end_min)
+    return [
+        Occupancy(oven_id, ferment, "ferment", batch_id),
+        Occupancy(oven_id, bake, "bake", batch_id),
+    ]
+
+
 def build_occupancies(
     oven_id: int,
     batch_id: int,
     start_min: int,
     recipe: RecipeDurations,
 ) -> list[Occupancy]:
-    ferment = Interval(start_min, start_min + recipe.ferment_min)
-    bake = Interval(ferment.end, ferment.end + recipe.bake_min)
-    return [
-        Occupancy(oven_id, ferment, "ferment", batch_id),
-        Occupancy(oven_id, bake, "bake", batch_id),
-    ]
+    return build_occupancies_from_ends(
+        oven_id,
+        batch_id,
+        start_min,
+        start_min + recipe.ferment_min,
+        start_min + recipe.total,
+    )
 
 
 def find_conflicts(existing: list[Occupancy], candidates: list[Occupancy]) -> list[tuple[Occupancy, Occupancy]]:

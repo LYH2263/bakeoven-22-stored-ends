@@ -28,6 +28,9 @@ class Batch(Base):
     oven_id: Mapped[int] = mapped_column(ForeignKey("ovens.id"))
     code: Mapped[str] = mapped_column(String(40), unique=True)
     start_min: Mapped[int] = mapped_column(Integer)  # minutes from 00:00
+    # 发酵止/烘烤止：创建批次时按当时产品时长写入，之后只读库里的值
+    ferment_end_min: Mapped[int | None] = mapped_column(Integer)
+    bake_end_min: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(20), default="scheduled")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
